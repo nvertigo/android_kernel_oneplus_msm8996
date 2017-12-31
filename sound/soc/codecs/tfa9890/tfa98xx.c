@@ -893,65 +893,65 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 
 
     if(np!=NULL)
-        tfa_codec_np =np;
+       tfa_codec_np =np;
 
-	if (!i2c_check_functionality(i2c->adapter, I2C_FUNC_I2C)) {
-		dev_err(&i2c->dev, "check_functionality failed\n");
-		return -EIO;
-	}
+    if (!i2c_check_functionality(i2c->adapter, I2C_FUNC_I2C)) {
+        dev_err(&i2c->dev, "check_functionality failed\n");
+        return -EIO;
+    }
+    
+    tfa98xx = devm_kzalloc(&i2c->dev, sizeof(struct tfa98xx),
+    GFP_KERNEL);
+    if (tfa98xx == NULL)
+        return -ENOMEM;
 
-	tfa98xx = devm_kzalloc(&i2c->dev, sizeof(struct tfa98xx),
-			       GFP_KERNEL);
-	if (tfa98xx == NULL)
-		return -ENOMEM;
+    tfa98xx->i2c = i2c;
+    tfa98xx->dsp_init = TFA98XX_DSP_INIT_PENDING;
 
-	tfa98xx->i2c = i2c;
-	tfa98xx->dsp_init = TFA98XX_DSP_INIT_PENDING;
+    tfa98xx->regmap = devm_regmap_init_i2c(i2c, &tfa98xx_regmap);
+    if (IS_ERR(tfa98xx->regmap)) {
+        ret = PTR_ERR(tfa98xx->regmap);
+        dev_err(&i2c->dev, "Failed to allocate regmap: %d\n", ret);
+        return ret;
+    }
 
-	tfa98xx->regmap = devm_regmap_init_i2c(i2c, &tfa98xx_regmap);
-	if (IS_ERR(tfa98xx->regmap)) {
-		ret = PTR_ERR(tfa98xx->regmap);
-		dev_err(&i2c->dev, "Failed to allocate regmap: %d\n", ret);
-		return ret;
-	}
+    i2c_set_clientdata(i2c, tfa98xx);
+    mutex_init(&tfa98xx->dsp_init_lock);
 
-	i2c_set_clientdata(i2c, tfa98xx);
-	mutex_init(&tfa98xx->dsp_init_lock);
+    /* work queue will be used to load DSP fw on first audio playback */
+    tfa98xx->tfa98xx_wq = create_singlethread_workqueue("tfa98xx");
+    if (tfa98xx->tfa98xx_wq == NULL) {
+        ret = -ENOMEM;
+        goto wq_fail;
+    }
 
-	/* work queue will be used to load DSP fw on first audio playback */
-	tfa98xx->tfa98xx_wq = create_singlethread_workqueue("tfa98xx");
-	if (tfa98xx->tfa98xx_wq == NULL) {
-		ret = -ENOMEM;
-		goto wq_fail;
-	}
-
-	tfa98xx->rst_gpio = of_get_named_gpio(np, "reset_gpio",0);
-	ret = gpio_request(tfa98xx->rst_gpio, "tfa reset gpio");
-	if (ret < 0)
-	{
-		pr_err("%s: tfa reset gpio_request failed: %d\n",__func__, ret);
-		goto gpio_fail;
-	}
-	gpio_direction_output(tfa98xx->rst_gpio, 1);
-	udelay(100);
-	gpio_direction_output(tfa98xx->rst_gpio, 0);
-
-	INIT_WORK(&tfa98xx->init_work, tfa98xx_dsp_init);
-	INIT_WORK(&tfa98xx->stop_work, tfa98xx_stop);
+    tfa98xx->rst_gpio = of_get_named_gpio(np, "reset_gpio",0);
+    ret = gpio_request(tfa98xx->rst_gpio, "tfa reset gpio");
+    if (ret < 0)
+    {
+        pr_err("%s: tfa reset gpio_request failed: %d\n",__func__, ret);
+        goto gpio_fail;
+    }
+    gpio_direction_output(tfa98xx->rst_gpio, 1);
+    udelay(100);
+    gpio_direction_output(tfa98xx->rst_gpio, 0);
+    
+    INIT_WORK(&tfa98xx->init_work, tfa98xx_dsp_init);
+    INIT_WORK(&tfa98xx->stop_work, tfa98xx_stop);
     tfa98xx->stop_ref = 0;
 
-	/* register codec */
-	ret = snd_soc_register_codec(&i2c->dev, &tfa98xx_soc_codec,
-				     &tfa98xx_dai, 1);
-	if (ret < 0) {
-		pr_err("%s: Error registering tfa98xx codec", __func__);
-		goto codec_fail;
-	}
+    /* register codec */
+    ret = snd_soc_register_codec(&i2c->dev, &tfa98xx_soc_codec,
+    &tfa98xx_dai, 1);
+    if (ret < 0) {
+        pr_err("%s: Error registering tfa98xx codec", __func__);
+        goto codec_fail;
+    }
 
-	pr_debug("tfa98xx probed successfully!");
+    pr_debug("tfa98xx probed successfully!");
 
 
-	error = sysfs_create_file(&i2c->dev.kobj, &tfa98xx_state_attr.attr);
+    error = sysfs_create_file(&i2c->dev.kobj, &tfa98xx_state_attr.attr);
     if(error < 0)
     {
         pr_err("%s sysfs_create_file tfa98xx_state_attr err.",__func__);
