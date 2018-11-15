@@ -318,7 +318,7 @@ static void power_supply_callback(struct power_supply *psy)
 		prev_soc_state = bcl_soc_state;
 /* taokai@bsp add for detecting usb status 2016.03.11 */
 		pr_debug("is_usb_present:%d", is_usb_present);
-		if(is_usb_present)
+		if (is_usb_present)
 			bcl_soc_state = BCL_HIGH_THRESHOLD;
 		else
 			bcl_soc_state = (battery_soc_val <= soc_low_threshold) ?
