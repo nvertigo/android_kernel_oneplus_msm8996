@@ -288,8 +288,8 @@ static const struct file_operations msm_core_ptable_ops = {
 
 int msm_core_debug_init(void)
 {
-	struct dentry *dir;
-	struct dentry *file;
+	struct dentry *dir = {0};
+	struct dentry *file = {0};
 	int i;
 
 	msm_core_data = get_cpu_pwr_stats();
