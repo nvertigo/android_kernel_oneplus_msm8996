@@ -1,6 +1,6 @@
-/* SPDX-License-Identifier: GPL-2.0
- *
- * Copyright (C) 2015-2017 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Copyright (C) 2015-2018 Jason A. Donenfeld <Jason@zx2c4.com>. All Rights Reserved.
  */
 
 #include <arpa/inet.h>
@@ -128,10 +128,6 @@ static bool parse_keyfile(uint8_t key[static WG_KEY_LEN], const char *path)
 	}
 
 	if (fread(dst, WG_KEY_LEN_BASE64 - 1, 1, f) != 1) {
-		if (errno) {
-			perror("fread");
-			goto out;
-		}
 		/* If we're at the end and we didn't read anything, we're /dev/null or an empty file. */
 		if (!ferror(f) && feof(f) && !ftell(f)) {
 			memset(key, 0, WG_KEY_LEN);
@@ -228,8 +224,21 @@ static inline bool parse_endpoint(struct sockaddr *endpoint, const char *value)
 		if (!ret)
 			break;
 		timeout = timeout * 3 / 2;
-		/* The set of return codes that are "permanent failures". All other possibilities are potentially transient. */
-		if (ret == EAI_NONAME || ret == EAI_FAIL || ret == EAI_NODATA || timeout >= 90000000) {
+		/* The set of return codes that are "permanent failures". All other possibilities are potentially transient.
+		 *
+		 * This is according to https://sourceware.org/glibc/wiki/NameResolver which states:
+		 *	"From the perspective of the application that calls getaddrinfo() it perhaps
+		 *	 doesn't matter that much since EAI_FAIL, EAI_NONAME and EAI_NODATA are all
+		 *	 permanent failure codes and the causes are all permanent failures in the
+		 *	 sense that there is no point in retrying later."
+		 *
+		 * So this is what we do, except FreeBSD removed EAI_NODATA some time ago, so that's conditional.
+		 */
+		if (ret == EAI_NONAME || ret == EAI_FAIL ||
+			#ifdef EAI_NODATA
+				ret == EAI_NODATA ||
+			#endif
+				timeout >= 90000000) {
 			free(mutable);
 			fprintf(stderr, "%s: `%s'\n", ret == EAI_SYSTEM ? strerror(errno) : gai_strerror(ret), value);
 			return false;
@@ -301,7 +310,7 @@ static inline bool parse_allowedips(struct wgpeer *peer, struct wgallowedip **la
 		saved_entry = strdup(mask);
 		ip = strsep(&mask, "/");
 
-		new_allowedip = calloc(1, sizeof(struct wgallowedip));
+		new_allowedip = calloc(1, sizeof(*new_allowedip));
 		if (!new_allowedip) {
 			perror("calloc");
 			free(saved_entry);
@@ -310,6 +319,7 @@ static inline bool parse_allowedips(struct wgpeer *peer, struct wgallowedip **la
 		}
 
 		if (!parse_ip(new_allowedip, ip)) {
+			free(new_allowedip);
 			free(saved_entry);
 			free(mutable);
 			return false;
@@ -420,24 +430,29 @@ error:
 
 bool config_read_line(struct config_ctx *ctx, const char *input)
 {
-	size_t len = strlen(input), cleaned_len = 0;
-	char *line = calloc(len + 1, sizeof(char));
+	size_t len, cleaned_len = 0;
+	char *line, *comment;
 	bool ret = true;
 
+	/* This is what strchrnul is for, but that isn't portable. */
+	comment = strchr(input, COMMENT_CHAR);
+	if (comment)
+		len = comment - input;
+	else
+		len = strlen(input);
+
+	line = calloc(len + 1, sizeof(char));
 	if (!line) {
 		perror("calloc");
 		ret = false;
 		goto out;
 	}
-	if (!len)
-		goto out;
+
 	for (size_t i = 0; i < len; ++i) {
 		if (!isspace(input[i]))
 			line[cleaned_len++] = input[i];
 	}
 	if (!cleaned_len)
-		goto out;
-	if (line[0] == COMMENT_CHAR)
 		goto out;
 	ret = process_line(ctx, line);
 out:
@@ -449,8 +464,8 @@ out:
 
 bool config_read_init(struct config_ctx *ctx, bool append)
 {
-	memset(ctx, 0, sizeof(struct config_ctx));
-	ctx->device = calloc(1, sizeof(struct wgdevice));
+	memset(ctx, 0, sizeof(*ctx));
+	ctx->device = calloc(1, sizeof(*ctx->device));
 	if (!ctx->device) {
 		perror("calloc");
 		return false;
@@ -496,7 +511,7 @@ static char *strip_spaces(const char *in)
 
 struct wgdevice *config_read_cmd(char *argv[], int argc)
 {
-	struct wgdevice *device = calloc(1, sizeof(struct wgdevice));
+	struct wgdevice *device = calloc(1, sizeof(*device));
 	struct wgpeer *peer = NULL;
 	struct wgallowedip *allowedip = NULL;
 
@@ -522,7 +537,7 @@ struct wgdevice *config_read_cmd(char *argv[], int argc)
 			argv += 2;
 			argc -= 2;
 		} else if (!strcmp(argv[0], "peer") && argc >= 2) {
-			struct wgpeer *new_peer = calloc(1, sizeof(struct wgpeer));
+			struct wgpeer *new_peer = calloc(1, sizeof(*new_peer));
 
 			allowedip = NULL;
 			if (!new_peer) {
